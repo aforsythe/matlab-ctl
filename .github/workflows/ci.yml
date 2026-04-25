@@ -1,0 +1,166 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Alex Forsythe, Academy of Motion Picture Arts and Sciences
+
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+# Cancel in-flight runs on new pushes to the same branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -------------------------------------------------------------------
+  # Static analysis on one MATLAB release. Generates the code-issues
+  # badge JSON and publishes it as an artifact for the update-badges
+  # job.
+  # -------------------------------------------------------------------
+  check:
+    name: Code analysis
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: R2025b
+          cache: true
+
+      - name: Run codeIssues
+        uses: matlab-actions/run-command@v3
+        with:
+          command: >-
+            addpath('buildUtilities');
+            results = codeIssues(["src","tests","buildUtilities"]);
+            if ~isempty(results.Issues), disp(results.Issues); end;
+            generateCodeIssuesBadge(results.Issues);
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: code-issues-badge
+          path: reports/badge/code_issues.json
+
+  # -------------------------------------------------------------------
+  # Build the MEX, run the MATLAB test suite. CTL comes from the
+  # Homebrew bottle (formula `ctl`, currently 1.5.5), so each cell
+  # skips a CTL clone + ~30-60s compile.
+  #
+  # Matrix shape varies by trigger to keep PR turnaround quick and
+  # macOS-runner spend bounded:
+  #   - push to main/dev:  R2023b + R2025b on macos-latest (version
+  #                        floor + newest verified)
+  #   - pull_request:      R2025b on macos-latest only
+  #
+  # R2023b is the floor because it's the first MATLAB release with
+  # native Apple Silicon support, and macos-latest is arm64. Free
+  # GitHub-hosted Intel runners (macos-13) have effectively no
+  # capacity, so x86_64 coverage isn't practical without paid larger
+  # runners.
+  # -------------------------------------------------------------------
+  test:
+    name: Test (${{ matrix.release }})
+    needs: check
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJSON(github.event_name == 'pull_request' && '["R2025b"]' || '["R2023b","R2025b"]') }}
+
+    steps:
+      - name: Check out matlab-ctl
+        uses: actions/checkout@v5
+
+      - name: Install Homebrew deps (CTL, Imath, OpenEXR)
+        # CMake is preinstalled on the macOS runner images.
+        run: brew install imath openexr ctl
+
+      - name: Resolve brew prefix for ctlrender
+        # /opt/homebrew on Apple Silicon, /usr/local on Intel; the
+        # parity tests need an absolute path to the binary.
+        run: echo "CTLRENDER=$(brew --prefix ctl)/bin/ctlrender" >> "$GITHUB_ENV"
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ matrix.release }}
+          cache: true
+
+      - name: Build apply_ctl MEX
+        # macos-latest is arm64; Homebrew bottles match the runner's
+        # arch, so the link succeeds without further hoops.
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_OSX_ARCHITECTURES=arm64 \
+                -DCTL_FROM_BREW=ON
+          cmake --build build -j
+
+      - name: Run tests + coverage
+        uses: matlab-actions/run-build@v3
+        with:
+          tasks: test
+
+      - name: Upload test + coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ matrix.release }}
+          path: reports/
+
+  # -------------------------------------------------------------------
+  # On a successful push to main, regenerate the badge JSON endpoints
+  # from the artifacts above and commit them back to the repo so the
+  # README shields show live data. Skip for pull requests and non-main
+  # pushes.
+  # -------------------------------------------------------------------
+  update-badges:
+    name: Update badges
+    needs: [check, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download code-issues badge
+        uses: actions/download-artifact@v8
+        with:
+          name: code-issues-badge
+          path: reports/badge/
+
+      - name: Download latest test results
+        uses: actions/download-artifact@v8
+        with:
+          name: test-results-R2025b
+          path: latest-results/
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: R2025b
+          cache: true
+
+      - name: Generate badges
+        uses: matlab-actions/run-command@v3
+        with:
+          command: >-
+            addpath('buildUtilities');
+            generateTestedWithBadge(["R2023b","R2025b"]);
+            if isfile('latest-results/coverage.xml'),
+              generateCoverageBadge('latest-results/coverage.xml');
+            end
+
+      - name: Commit badge updates
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name  "github-actions[bot]"
+          git add reports/badge/*.json
+          git diff --staged --quiet || git commit -m "ci: update badges [skip ci]"
+          git push

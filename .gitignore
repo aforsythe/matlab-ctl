@@ -1,0 +1,41 @@
+# MEX build artifacts
+*.mexmaci64
+*.mexmaca64
+*.mexa64
+*.mexw64
+*.o
+*.obj
+
+# CMake build dirs (`build-alt` etc. are documented in BUILDING.md;
+# match those too without swallowing `buildUtilities/`, `buildfile.m`
+# or anything else that starts with "build").
+build/
+build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake.lock
+
+# MATLAB session state
+*.asv
+*.autosave
+octave-workspace
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Personal planning notes
+docs/PLAN.md
+
+# buildtool artifacts (reports/badge/*.json is committed; the rest isn't)
+reports/*.xml
+reports/*.html
+!reports/badge/
+.buildtool/

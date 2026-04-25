@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: If you use matlab-ctl in academic work, please cite it via the metadata below.
+type: software
+title: matlab-ctl
+abstract: >-
+  Native MATLAB bindings for the CTL (Color Transformation Language)
+  interpreter. Provides a MEX function that calls libIlmCtl
+  in-process, so applying CTL transforms to MATLAB arrays no longer
+  requires shelling out to a subprocess or moving data through
+  intermediate TIFF files. Caches loaded interpreters across calls
+  and invalidates on .ctl mtime change so iterative CTL development
+  in MATLAB does not pay repeated module-parse overhead.
+authors:
+  - family-names: Forsythe
+    given-names: Alex
+repository-code: https://github.com/aforsythe/matlab-ctl
+keywords:
+  - color science
+  - CTL
+  - Color Transformation Language
+  - ACES
+  - MATLAB
+  - MEX
+license: Apache-2.0
+version: 0.1.0
+date-released: 2026-04-23
