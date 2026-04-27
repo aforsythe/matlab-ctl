@@ -31,30 +31,15 @@ function generateCodeIssuesBadge(issues)
 
     if count == 0
         color = 'brightgreen';
-        msg   = '0 issues';
     elseif count <= 5
         color = 'yellow';
-        msg   = sprintf('%d issues', count);
     else
         color = 'red';
-        msg   = sprintf('%d issues', count);
     end
 
     writeBadge('code_issues.json', struct( ...
         'schemaVersion', 1, ...
         'label',   'code issues', ...
-        'message', msg, ...
+        'message', sprintf('%d issues', count), ...
         'color',   color));
-end
-
-function writeBadge(fileName, payload)
-%WRITEBADGE Serialize PAYLOAD as pretty-printed JSON into
-% reports/badge/FILENAME, creating the directory if needed.
-    dir = fullfile('reports', 'badge');
-    if ~isfolder(dir), mkdir(dir); end
-    out = fullfile(dir, fileName);
-    fid = fopen(out, 'w');
-    c   = onCleanup(@() fclose(fid));
-    fprintf(fid, '%s', jsonencode(payload, PrettyPrint=true));
-    fprintf('wrote %s\n', out);
 end

@@ -422,6 +422,23 @@ std::string trimWhitespace(const std::string &s)
     return s.substr(a, b - a);
 }
 
+//
+// Compose a matlabctl:ctl error message body: PREFIX + (captured;
+// )? + WHAT. Wraps the splice-captured-into-error pattern that the
+// signature subcommand and the main dispatch loop both need around
+// MessageScope -- one place to evolve the format if e.g. we ever
+// want to wrap captured text in quotes or drop it on certain
+// exceptions.
+//
+std::string composeCtlError(const std::string &prefix,
+                            const std::string &what,
+                            const std::string &captured)
+{
+    const std::string trimmed = trimWhitespace(captured);
+    if (trimmed.empty()) return prefix + what;
+    return prefix + trimmed + "; " + what;
+}
+
 Ctl::SimdInterpreter &getOrLoadInterpreter(const std::string &path)
 {
     time_t sec = 0; long nsec = 0;
@@ -937,22 +954,14 @@ public:
                                     stderr);
                 }
                 catch (const Iex::BaseExc &e) {
-                    std::string detail = e.what();
-                    std::string captured = trimWhitespace(cap.drain());
-                    if (!captured.empty())
-                        detail = captured + "; " + detail;
-                    reportError("matlabctl:ctl",
-                        std::string("CTL error loading '") + path +
-                        "': " + detail);
+                    reportError("matlabctl:ctl", composeCtlError(
+                        "CTL error loading '" + path + "': ",
+                        e.what(), cap.drain()));
                 }
                 catch (const std::runtime_error &e) {
-                    std::string detail = e.what();
-                    std::string captured = trimWhitespace(cap.drain());
-                    if (!captured.empty())
-                        detail = captured + "; " + detail;
-                    reportError("matlabctl:ctl",
-                        std::string("error loading '") + path +
-                        "': " + detail);
+                    reportError("matlabctl:ctl", composeCtlError(
+                        "error loading '" + path + "': ",
+                        e.what(), cap.drain()));
                 }
                 return;
             }
@@ -1026,23 +1035,15 @@ public:
                     std::fwrite(warns.data(), 1, warns.size(), stderr);
             }
             catch (const Iex::BaseExc &e) {
-                std::string detail = e.what();
-                std::string captured = trimWhitespace(cap.drain());
-                if (!captured.empty())
-                    detail = captured + "; " + detail;
-                reportError("matlabctl:ctl",
-                    std::string("CTL error in '") + path + "': " +
-                    detail);
+                reportError("matlabctl:ctl", composeCtlError(
+                    "CTL error in '" + path + "': ",
+                    e.what(), cap.drain()));
                 return;
             }
             catch (const std::runtime_error &e) {
-                std::string detail = e.what();
-                std::string captured = trimWhitespace(cap.drain());
-                if (!captured.empty())
-                    detail = captured + "; " + detail;
-                reportError("matlabctl:ctl",
-                    std::string("error applying '") + path + "': " +
-                    detail);
+                reportError("matlabctl:ctl", composeCtlError(
+                    "error applying '" + path + "': ",
+                    e.what(), cap.drain()));
                 return;
             }
         }

@@ -56,15 +56,3 @@ function pct = parseLineRatePct(xmlFile)
         pct = 100 * str2double(toks{1});
     end
 end
-
-function writeBadge(fileName, payload)
-%WRITEBADGE Serialize PAYLOAD as pretty-printed JSON into
-% reports/badge/FILENAME, creating the directory if needed.
-    dir = fullfile('reports', 'badge');
-    if ~isfolder(dir), mkdir(dir); end
-    out = fullfile(dir, fileName);
-    fid = fopen(out, 'w');
-    c   = onCleanup(@() fclose(fid));
-    fprintf(fid, '%s', jsonencode(payload, PrettyPrint=true));
-    fprintf('wrote %s\n', out);
-end
