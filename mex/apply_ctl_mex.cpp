@@ -537,8 +537,11 @@ void fillScalarVarying(Ctl::FunctionArgPtr arg, double value,
 //   2. Else if the arg is a declared-varying float named "aIn",
 //      auto-default to 1.0 (ACES convention: alpha passes through
 //      as opaque when the caller isn't carrying alpha).
-//   3. Else if the arg has a CTL-side default value, it fires
-//      automatically on callFunction.
+//   3. Else if the arg has a CTL-side default value, copy its
+//      _defaultReg into the live _reg via setDefaultValue() --
+//      callFunction does NOT do this implicitly; without the
+//      explicit copy the live register stays zero-initialized and
+//      the transform silently returns zeros.
 //   4. Else raise an error naming the missing parameter.
 //
 // Output args beyond rOut/gOut/bOut (e.g. aOut) are set varying so
@@ -646,6 +649,12 @@ void applyCtlStage(Ctl::SimdInterpreter &interp,
                 }
                 throw std::runtime_error(msg);
             }
+
+            // CTL-source default. callFunction reads from the live
+            // register, not _defaultReg, so we have to copy across
+            // explicitly -- matches the upstream reference
+            // implementation in ImfCtlApplyTransforms.cpp.
+            arg->setDefaultValue();
         }
 
         for (std::size_t i = 0; i < 3; ++i) fn->inputArg(i)->setVarying(true);

@@ -27,7 +27,8 @@ classdef applyCtlTest < matlab.unittest.TestCase
         IdCtl       % path to identity.ctl
         ScaleCtl    % path to scale2x.ctl
         ReqCtl      % path to required_param.ctl
-        DefCtl      % path to defaulted_param.ctl
+        DefCtl      % path to defaulted_param.ctl (varying default)
+        DefUniCtl   % path to defaulted_uniform_param.ctl
         AlphaCtl    % path to alpha_passthrough.ctl
         Ctlrender   % path to ctlrender binary
     end
@@ -48,8 +49,9 @@ classdef applyCtlTest < matlab.unittest.TestCase
             testCase.IdCtl    = fullfile(here, 'identity.ctl');
             testCase.ScaleCtl = fullfile(here, 'scale2x.ctl');
             testCase.ReqCtl   = fullfile(here, 'required_param.ctl');
-            testCase.DefCtl   = fullfile(here, 'defaulted_param.ctl');
-            testCase.AlphaCtl = fullfile(here, 'alpha_passthrough.ctl');
+            testCase.DefCtl    = fullfile(here, 'defaulted_param.ctl');
+            testCase.DefUniCtl = fullfile(here, 'defaulted_uniform_param.ctl');
+            testCase.AlphaCtl  = fullfile(here, 'alpha_passthrough.ctl');
             env = getenv('CTLRENDER');
             if ~isempty(env)
                 testCase.Ctlrender = env;
@@ -350,6 +352,50 @@ classdef applyCtlTest < matlab.unittest.TestCase
             in = rand(4, 4, 3);
             out = apply_ctl(in, testCase.ReqCtl, exposure=2.5);
             testCase.verifyEqual(out, 2.5 * in, AbsTol=1e-6);
+        end
+
+        function varyingDefaultFiresWithoutOverride(testCase)
+            % defaulted_param.ctl declares `varying float exposure =
+            % 1.0`. Calling without an override must use 1.0 (not
+            % the zero-initialized live register, which silently
+            % produces all-zero output -- the bug that motivated
+            % wiring setDefaultValue() into the dispatch loop).
+            in = rand(8, 8, 3);
+            out = apply_ctl(in, testCase.DefCtl);
+            testCase.verifyEqual(out, in, AbsTol=1e-6);
+        end
+
+        function uniformDefaultFiresWithoutOverride(testCase)
+            % defaulted_uniform_param.ctl declares `float scale =
+            % 2.0` (uniform; CTL's default storage class). Same
+            % contract as the varying-default case: the CTL-source
+            % default has to fire when the caller is silent.
+            in = rand(8, 8, 3);
+            out = apply_ctl(in, testCase.DefUniCtl);
+            testCase.verifyEqual(out, 2 * in, AbsTol=1e-6);
+        end
+
+        function defaultMatchesExplicitOverride(testCase)
+            % If the caller passes the same value the CTL declares
+            % as its default, the result must be byte-identical to
+            % the no-override path. AbsTol=0 here -- both call sites
+            % bind the same numeric, so any drift signals a
+            % marshaling bug, not a precision issue.
+            in = rand(4, 4, 3);
+            implicit = apply_ctl(in, testCase.DefUniCtl);
+            explicit = apply_ctl(in, testCase.DefUniCtl, scale=2.0);
+            testCase.verifyEqual(implicit, explicit);
+        end
+
+        function defaultedParamSurvivesChain(testCase)
+            % A defaulted-param stage chained with another stage:
+            % each stage gets its own per-worker FunctionCall, and
+            % the default fires on each. Stage 1 (scale=2.0)
+            % produces 2*in, stage 2 (scale2x) doubles again -> 4*in.
+            in = rand(8, 8, 3);
+            out = apply_ctl(in, [string(testCase.DefUniCtl), ...
+                                  string(testCase.ScaleCtl)]);
+            testCase.verifyEqual(out, 4 * in, AbsTol=1e-6);
         end
 
         function unknownParamRaises(testCase)
