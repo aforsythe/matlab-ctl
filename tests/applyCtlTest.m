@@ -177,6 +177,55 @@ classdef applyCtlTest < matlab.unittest.TestCase
             testCase.verifyEqual(mexOut, refOut);
         end
 
+        function acesV2ChainParity(testCase)
+            % Real ACES v2 IDT->ODT chain end-to-end against
+            % ctlrender. Exercises the things synthetic fixtures
+            % don't: deep multi-file imports (ACES core lib resolved
+            % via CTL_MODULE_PATH), the auto-alpha convention (the
+            % IDT declares `varying aIn` with no default), CTL-source
+            % defaults firing on a real workload (the ODT declares
+            % `varying aIn = 1.0`), and module-parse cost on a heavy
+            % chain (~1 s cold for the OT alone).
+            %
+            % Self-locates: scans CTL_MODULE_PATH (which an ACES
+            % workflow already needs) for the ACES core lib marker,
+            % then resolves IDT and ODT relative to its parent. No
+            % extra env var, no separate config. Skipped if
+            % CTL_MODULE_PATH is unset, doesn't contain an ACES
+            % core lib, or ctlrender isn't available -- keeps
+            % `runtests` green on machines without ACES.
+            modulePath = getenv('CTL_MODULE_PATH');
+            testCase.assumeNotEmpty(modulePath, ...
+                'CTL_MODULE_PATH unset; skipping ACES integration test');
+            testCase.assumeCtlrender();
+            [acesRoot, libDir] = applyCtlTest.findAcesRoot(modulePath);
+            testCase.assumeNotEmpty(acesRoot, sprintf( ...
+                ['no ACES core lib on CTL_MODULE_PATH (looked for ', ...
+                 'Lib.Academy.OutputTransform.ctl in: %s)'], modulePath));
+            idt = fullfile(acesRoot, ...
+                'aces-input-and-colorspaces', 'ACEScg', ...
+                'CSC.Academy.ACEScg_to_ACES.ctl');
+            odt = fullfile(acesRoot, 'aces-output', 'd65', 'rec709', ...
+                'Output.Academy.Rec709-D65_100nit_in_Rec709-D65_BT1886.ctl');
+            testCase.assumeTrue(isfile(idt), ...
+                sprintf('ACES IDT not at %s', idt));
+            testCase.assumeTrue(isfile(odt), ...
+                sprintf('ACES ODT not at %s', odt));
+
+            in = applyCtlTest.acesProbeInput();
+            mexOut = apply_ctl(in, [string(idt), string(odt)]);
+            refOut = ctlrender_via_disk(in, {char(idt), char(odt)}, ...
+                testCase.Ctlrender, ...
+                WithAlpha=true, ...
+                ExtraEnv=string(sprintf('CTL_MODULE_PATH=%s', libDir)));
+
+            % Single-FP32-ULP-level agreement (~1.2e-7 per op);
+            % observed max diff ~1.1e-6 on this chain, set the
+            % tolerance an order of magnitude looser to absorb
+            % future stage additions without paper-cutting CI.
+            testCase.verifyEqual(mexOut, refOut, AbsTol=1e-5);
+        end
+
         function parityNonSquare(testCase)
             % Non-square image exercises row vs column indexing.
             testCase.assumeCtlrender();
@@ -796,6 +845,52 @@ classdef applyCtlTest < matlab.unittest.TestCase
     end
 
     methods (Access = private, Static)
+        function [acesRoot, libDir] = findAcesRoot(modulePath)
+            % Scan a colon-separated CTL_MODULE_PATH for an ACES
+            % core lib directory and return the ACES tree root.
+            % Probes for Lib.Academy.OutputTransform.ctl as the
+            % canonical marker -- it's part of every ACES v2
+            % distribution and lives at <root>/aces-core/lib/, so
+            % its parent's parent is the ACES root we resolve
+            % IDT/ODT against. Returns empty acesRoot if no entry
+            % matches.
+            arguments
+                modulePath (1,:) char
+            end
+            acesRoot = '';
+            libDir   = '';
+            entries = strsplit(modulePath, ':');
+            marker = 'Lib.Academy.OutputTransform.ctl';
+            for i = 1:numel(entries)
+                entry = strtrim(entries{i});
+                if isempty(entry), continue; end
+                if isfile(fullfile(entry, marker))
+                    libDir   = entry;
+                    acesRoot = fileparts(fileparts(entry));
+                    return;
+                end
+            end
+        end
+
+        function in = acesProbeInput()
+            % Compact 2x4 RGB image whose patches collectively
+            % exercise the major stages of an ACES Output Transform:
+            % mid-gray for the tonescale knee, primaries for gamut
+            % compression, near-saturated patches for the
+            % gamut-clip / EOTF tail. Small enough that the parity
+            % comparison still byte-prints cleanly, large enough
+            % that any worker-chunk drift would show up.
+            in = zeros(2, 4, 3);
+            in(1,1,:) = [0.18 0.18 0.18];   % mid-gray
+            in(1,2,:) = [1.00 0.00 0.00];   % red primary
+            in(1,3,:) = [0.00 1.00 0.00];   % green primary
+            in(1,4,:) = [0.00 0.00 1.00];   % blue primary
+            in(2,1,:) = [0.50 0.50 0.50];   % above mid-gray
+            in(2,2,:) = [0.95 0.10 0.10];   % near-saturated red
+            in(2,3,:) = [0.10 0.95 0.10];   % near-saturated green
+            in(2,4,:) = [0.10 0.10 0.95];   % near-saturated blue
+        end
+
         function [modroot, mainPath, cleanup] = makeImportFixture(tag)
             % Build a self-contained {helper module, importing main}
             % pair in a fresh temp directory. The returned CLEANUP

@@ -198,12 +198,16 @@ followed by an output transform (Rec.709 100-nit BT.1886):
 >> out = apply_ctl(neutrals, [idt, odt]);
 ```
 
-Every ACES IDT and ODT declares a varying `aIn` (alpha) input, and
-most leave it without a CTL-source default. `apply_ctl` auto-
-defaults any varying `aIn` to 1.0 (the ACES convention: opaque
-passthrough) so the chain above just works. To override the alpha
-broadcast, or to set any other input the CTL exposes (uniform or
-varying), pass it as a trailing Name=Value pair:
+Every ACES IDT and ODT declares a varying `aIn` (alpha) input.
+Whether it carries a CTL-source default varies by transform --
+older IDTs and CSCs typically don't; current ODTs typically do
+(`aIn = 1.0`). Either case "just works" without an explicit
+override: when there's no source-level default, `apply_ctl` falls
+back to the ACES convention (auto-broadcast `aIn = 1.0`, opaque
+passthrough); when there is one, the CTL default fires. To
+override the alpha broadcast, or to set any other input the CTL
+exposes (uniform or varying), pass it as a trailing Name=Value
+pair:
 
 ```matlab
 >> out = apply_ctl(neutrals, [idt, odt], aIn=0.5);
@@ -276,6 +280,22 @@ auto-skip if the binary isn't at the default path; override via:
 >> setenv('CTLRENDER', '/path/to/ctlrender')
 >> runtests('applyCtlTest')
 ```
+
+An end-to-end ACES v2 integration test (`acesV2ChainParity`) runs
+the same parity check against a real ACEScg-to-Rec.709 IDT → ODT
+chain. It activates when `CTL_MODULE_PATH` points at an ACES core
+lib directory; the test self-locates by scanning the path for
+`Lib.Academy.OutputTransform.ctl` and resolves the IDT and ODT
+relative to the parent ACES tree, so the same env var an ACES
+workflow already needs is the only configuration:
+
+```matlab
+>> setenv('CTL_MODULE_PATH', '/path/to/aces/aces-core/lib')
+>> runtests('applyCtlTest/acesV2ChainParity')
+```
+
+When `CTL_MODULE_PATH` is unset or doesn't contain an ACES library,
+this test skips cleanly and the rest of the suite still runs.
 
 ## Helpers & diagnostics
 
