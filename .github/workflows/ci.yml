@@ -100,16 +100,62 @@ jobs:
                 -DCTL_FROM_BREW=ON
           cmake --build build -j
 
-      - name: Run tests + coverage
+      - name: Run tests
         uses: matlab-actions/run-build@v3
         with:
           tasks: test
 
-      - name: Upload test + coverage reports
+      - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ matrix.release }}
+          path: reports/
+
+  # -------------------------------------------------------------------
+  # Coverage runs once on the primary release and is the sole producer
+  # of coverage.xml + coverage badge JSON. Gated on push-to-main since
+  # update-badges is the only consumer; PRs skip the instrumentation
+  # cost.
+  # -------------------------------------------------------------------
+  coverage:
+    name: Coverage (R2025b)
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    steps:
+      - name: Check out ctl-matlab
+        uses: actions/checkout@v5
+
+      - name: Install Homebrew deps (CTL, Imath, OpenEXR)
+        run: brew install imath openexr ctl
+
+      - name: Resolve brew prefix for ctlrender
+        run: echo "CTLRENDER=$(brew --prefix ctl)/bin/ctlrender" >> "$GITHUB_ENV"
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: R2025b
+          cache: true
+
+      - name: Build apply_ctl MEX
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_OSX_ARCHITECTURES=arm64 \
+                -DCTL_FROM_BREW=ON
+          cmake --build build -j
+
+      - name: Run coverage
+        uses: matlab-actions/run-build@v3
+        with:
+          tasks: coverage
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-results
           path: reports/
 
   # -------------------------------------------------------------------
@@ -120,7 +166,7 @@ jobs:
   # -------------------------------------------------------------------
   update-badges:
     name: Update badges
-    needs: [check, test]
+    needs: [check, test, coverage]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-latest
     permissions:
@@ -135,10 +181,10 @@ jobs:
           name: code-issues-badge
           path: reports/badge/
 
-      - name: Download latest test results
+      - name: Download coverage results
         uses: actions/download-artifact@v8
         with:
-          name: test-results-R2025b
+          name: coverage-results
           path: latest-results/
 
       - name: Set up MATLAB

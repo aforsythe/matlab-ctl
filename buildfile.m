@@ -1,7 +1,7 @@
 function plan = buildfile
 % BUILDFILE  Build plan for the ctl-matlab project.
 %
-%   plan = buildfile returns a buildplan that wires up three tasks
+%   plan = buildfile returns a buildplan that wires up four tasks
 %   against MATLAB's buildtool. Invoke via `buildtool <task>` at the
 %   repo root.
 %
@@ -11,10 +11,12 @@ function plan = buildfile
 %       plan - Buildplan object consumed by buildtool
 %
 %   TASKS:
-%       clean - Delete generated test and coverage reports
-%       check - Run static code analysis (codeIssues) on src and tests
-%       test  - Run unit tests with JUnit + Cobertura coverage output,
-%               written to reports/. Depends on `check`.
+%       clean    - Delete generated test and coverage reports
+%       check    - Run static code analysis (codeIssues) on src and tests
+%       test     - Run unit tests with JUnit output, written to reports/.
+%                  Depends on `check`.
+%       coverage - Run unit tests with JUnit + Cobertura coverage output,
+%                  written to reports/. Depends on `check`.
 %
 %   REQUIRES:
 %       MATLAB R2023b or later (for buildtool). The apply_ctl MEX
@@ -24,6 +26,7 @@ function plan = buildfile
 %   EXAMPLE:
 %       >> buildtool          % default tasks: check, test
 %       >> buildtool test
+%       >> buildtool coverage
 %       >> buildtool clean
 %
 %   Copyright (c) 2026 Alex Forsythe, Academy of Motion Picture Arts and Sciences
@@ -38,7 +41,8 @@ function plan = buildfile
     plan = buildplan(localfunctions);
 
     % Configure dependencies and defaults.
-    plan("test").Dependencies = "check";
+    plan("test").Dependencies     = "check";
+    plan("coverage").Dependencies = "check";
     plan.DefaultTasks = ["check", "test"];
 end
 
@@ -62,7 +66,18 @@ end
 
 
 function testTask(~)
-% Run unit tests with coverage
+% Run unit tests, write JUnit XML (no coverage instrumentation)
+    runTests(false);
+end
+
+
+function coverageTask(~)
+% Run unit tests with Cobertura coverage; write coverage.xml + badge
+    runTests(true);
+end
+
+
+function runTests(withCoverage)
     import matlab.unittest.TestRunner
     import matlab.unittest.plugins.CodeCoveragePlugin
     import matlab.unittest.plugins.XMLPlugin
@@ -79,20 +94,24 @@ function testTask(~)
         XMLPlugin.producingJUnitFormat( ...
             fullfile("reports", "test-results.xml")));
 
-    srcFiles = dir(fullfile("src", "**", "*.m"));
-    srcFiles = string(arrayfun(@(f) fullfile(f.folder, f.name), ...
-        srcFiles, UniformOutput=false));
-    if ~isempty(srcFiles)
-        runner.addPlugin(CodeCoveragePlugin.forFile(srcFiles, ...
-            "Producing", ...
-            CoberturaFormat(fullfile("reports", "coverage.xml"))));
+    if withCoverage
+        srcFiles = dir(fullfile("src", "**", "*.m"));
+        srcFiles = string(arrayfun(@(f) fullfile(f.folder, f.name), ...
+            srcFiles, UniformOutput=false));
+        if ~isempty(srcFiles)
+            runner.addPlugin(CodeCoveragePlugin.forFile(srcFiles, ...
+                "Producing", ...
+                CoberturaFormat(fullfile("reports", "coverage.xml"))));
+        end
     end
 
     result = runner.run(suite);
 
-    coverageXml = fullfile("reports", "coverage.xml");
-    if isfile(coverageXml)
-        generateCoverageBadge(coverageXml);
+    if withCoverage
+        coverageXml = fullfile("reports", "coverage.xml");
+        if isfile(coverageXml)
+            generateCoverageBadge(coverageXml);
+        end
     end
 
     assertSuccess(result);
