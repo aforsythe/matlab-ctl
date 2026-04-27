@@ -35,6 +35,7 @@ extern "C" bool utIsInterruptPending(void);
 
 #include <CtlInterpreter.h>
 #include <CtlFunctionCall.h>
+#include <CtlMessage.h>
 #include <CtlRcPtr.h>
 #include <CtlSimdInterpreter.h>
 #include <CtlType.h>
@@ -46,6 +47,7 @@ extern "C" bool utIsInterruptPending(void);
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -341,6 +343,83 @@ void applyCtlModulePath()
     }
     if (!paths.empty())
         Ctl::Interpreter::setModulePaths(paths);
+}
+
+//
+// CTL diagnostics capture. The upstream library writes parse and
+// import errors via its `MessageOutputFunction` callback (default:
+// std::cerr) and then throws a follow-up exception. The exception
+// itself is uninformative (e.g. "Failed to load CTL module" or
+// "Cannot find CTL function main."); the *useful* line ("Cannot
+// find CTL module \"X\".") only reaches the callback. Hooking the
+// callback lets us splice that detail into the matlabctl:ctl error
+// instead of letting it leak to a stderr nobody's watching.
+//
+// Buffer is thread_local so chunk-parallel CTL print() calls don't
+// race on a shared string. We only inspect the main-thread buffer
+// here (load and apply both run on the main MEX thread); worker
+// threads have their own buffer that nobody drains, which means
+// CTL print() output from worker code isn't preserved -- a small
+// regression deemed acceptable for the much more common case of
+// surfacing import / parse errors.
+//
+std::string &messageBuffer() noexcept
+{
+    thread_local std::string buf;
+    return buf;
+}
+
+void captureMessage(const std::string &msg)
+{
+    messageBuffer() += msg;
+}
+
+class MessageScope
+{
+public:
+    MessageScope() noexcept
+    {
+        messageBuffer().clear();
+        prev_ = Ctl::setMessageOutputFunction(captureMessage);
+    }
+
+    ~MessageScope() noexcept
+    {
+        Ctl::setMessageOutputFunction(prev_);
+        messageBuffer().clear();
+    }
+
+    MessageScope(const MessageScope &) = delete;
+    MessageScope &operator=(const MessageScope &) = delete;
+
+    //
+    // Return everything captured so far and empty the buffer.
+    //
+    std::string drain() noexcept
+    {
+        std::string out;
+        out.swap(messageBuffer());
+        return out;
+    }
+
+private:
+    Ctl::MessageOutputFunction prev_ = nullptr;
+};
+
+//
+// Strip ASCII whitespace from both ends of S. Used when splicing
+// captured stderr into a user-facing error: the upstream messages
+// usually end with a newline we don't want in the matlabctl error.
+//
+std::string trimWhitespace(const std::string &s)
+{
+    const auto isWs = [](unsigned char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    };
+    std::size_t a = 0, b = s.size();
+    while (a < b && isWs(static_cast<unsigned char>(s[a]))) ++a;
+    while (b > a && isWs(static_cast<unsigned char>(s[b - 1]))) --b;
+    return s.substr(a, b - a);
 }
 
 Ctl::SimdInterpreter &getOrLoadInterpreter(const std::string &path)
@@ -839,19 +918,32 @@ public:
                 }
                 const std::string path =
                     CharArray(inputs[1]).toAscii();
+                MessageScope cap;
                 try {
                     if (outputs.size() > 0)
                         outputs[0] = buildSignatureStruct(path);
+                    std::string warns = cap.drain();
+                    if (!warns.empty())
+                        std::fwrite(warns.data(), 1, warns.size(),
+                                    stderr);
                 }
                 catch (const Iex::BaseExc &e) {
+                    std::string detail = e.what();
+                    std::string captured = trimWhitespace(cap.drain());
+                    if (!captured.empty())
+                        detail = captured + "; " + detail;
                     reportError("matlabctl:ctl",
                         std::string("CTL error loading '") + path +
-                        "': " + e.what());
+                        "': " + detail);
                 }
                 catch (const std::runtime_error &e) {
+                    std::string detail = e.what();
+                    std::string captured = trimWhitespace(cap.drain());
+                    if (!captured.empty())
+                        detail = captured + "; " + detail;
                     reportError("matlabctl:ctl",
                         std::string("error loading '") + path +
-                        "': " + e.what());
+                        "': " + detail);
                 }
                 return;
             }
@@ -901,21 +993,47 @@ public:
         std::set<std::string> dataArgNames;
         std::set<std::string> extraArgNames;
         for (const auto &path : paths) {
+            //
+            // Capture stderr across BOTH the load and apply steps:
+            // an `import` failure prints "Cannot find CTL module
+            // ..." to stderr during loadFile but does NOT throw
+            // there -- it throws later from applyCtlStage as the
+            // generic "Cannot find CTL function main." So we keep
+            // the capture alive across the whole stage and splice
+            // any captured bytes into whichever error fires.
+            //
+            // Successful stages get their captured stderr re-emitted
+            // verbatim, so CTL `print()` output and warnings still
+            // reach the terminal in the normal case.
+            //
+            MessageScope cap;
             try {
-                Ctl::SimdInterpreter &interp = getOrLoadInterpreter(path);
+                Ctl::SimdInterpreter &interp =
+                    getOrLoadInterpreter(path);
                 applyCtlStage(interp, overrides, consumedParams,
                               dataArgNames, extraArgNames, R, G, B);
+                std::string warns = cap.drain();
+                if (!warns.empty())
+                    std::fwrite(warns.data(), 1, warns.size(), stderr);
             }
             catch (const Iex::BaseExc &e) {
+                std::string detail = e.what();
+                std::string captured = trimWhitespace(cap.drain());
+                if (!captured.empty())
+                    detail = captured + "; " + detail;
                 reportError("matlabctl:ctl",
                     std::string("CTL error in '") + path + "': " +
-                    e.what());
+                    detail);
                 return;
             }
             catch (const std::runtime_error &e) {
+                std::string detail = e.what();
+                std::string captured = trimWhitespace(cap.drain());
+                if (!captured.empty())
+                    detail = captured + "; " + detail;
                 reportError("matlabctl:ctl",
                     std::string("error applying '") + path + "': " +
-                    e.what());
+                    detail);
                 return;
             }
         }

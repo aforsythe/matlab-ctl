@@ -593,12 +593,19 @@ classdef applyCtlTest < matlab.unittest.TestCase
 
         function malformedCtlRaises(testCase)
             % A file that exists but isn't valid CTL has to surface
-            % the parser's complaint, not crash the interpreter or
-            % silently load an empty module.
+            % the parser's complaint inline in the matlabctl:ctl
+            % message -- not silently load an empty module, and not
+            % leak the diagnostic to a stderr nobody's watching. The
+            % MEX hooks the CTL MessageOutputFunction callback and
+            % splices captured bytes into the error.
             tmpdir = tempname;
             mkdir(tmpdir);
             c = onCleanup(@() rmdir(tmpdir, 's'));
             badPath = fullfile(tmpdir, 'broken.ctl');
+            % Use a distinctive, parser-rejecting token so we can
+            % assert the offending source text appears in the
+            % captured error rather than leaning on a specific
+            % upstream phrasing that could change between releases.
             fid = fopen(badPath, 'w');
             fprintf(fid, 'this is not valid CTL syntax @@@\n');
             fclose(fid);
@@ -609,6 +616,12 @@ classdef applyCtlTest < matlab.unittest.TestCase
             catch err
                 testCase.verifyEqual(err.identifier, 'matlabctl:ctl');
                 testCase.verifySubstring(err.message, badPath);
+                % Captured parser context: the offending line text.
+                testCase.verifySubstring(err.message, '@@@');
+                % Captured parser verdict: the upstream emits this
+                % uniformly when a module fails to compile.
+                testCase.verifySubstring(err.message, ...
+                                         'Failed to load CTL module');
             end
         end
 
@@ -662,6 +675,28 @@ classdef applyCtlTest < matlab.unittest.TestCase
             catch err
                 testCase.verifyEqual(err.identifier, 'matlabctl:ctl');
                 testCase.verifySubstring(err.message, mainPath);
+            end
+        end
+
+        function moduleImportFailureNamesMissingModule(testCase)
+            % When `import "Scaler"` can't be resolved, the
+            % matlabctl:ctl message must include the *missing
+            % module's* name -- not just the generic "Cannot find
+            % CTL function main." that the upstream throws after
+            % the parse step records the import failure. The
+            % missing-module diagnostic is delivered via the CTL
+            % library's MessageOutputFunction; the MEX hooks that
+            % callback so its bytes can be spliced into the error
+            % instead of leaking to a stderr nobody's watching.
+            [~, mainPath, cleanup] = ...
+                applyCtlTest.makeImportFixture('main_missing_named'); %#ok<ASGLU>
+            setenv('CTL_MODULE_PATH', '');
+            try
+                apply_ctl(rand(4, 3), mainPath);
+                testCase.verifyFail('expected an error');
+            catch err
+                testCase.verifyEqual(err.identifier, 'matlabctl:ctl');
+                testCase.verifySubstring(err.message, 'Scaler');
             end
         end
 
