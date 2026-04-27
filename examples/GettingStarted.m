@@ -1,6 +1,6 @@
-%[text] # Getting Started with matlab-ctl
+%[text] # Getting Started with ctl-matlab
 %[text] This walkthrough applies CTL (Color Transformation Language) transforms to a handful of MATLAB array shapes, starting with a single scalar and building up to an image. Before running, make sure:
-%[text] - the matlab-ctl project is open: `openProject('matlab-ctl.prj')` at the repo root
+%[text] - the ctl-matlab project is open: `openProject('ctl-matlab.prj')` at the repo root
 %[text] - the MEX has been built via CMake (see `docs/BUILDING.md`) -- opening the project does **not** build the MEX, it only adds `src/` and `tests/` to the path \
 %%
 %[text] ## Locate fixtures

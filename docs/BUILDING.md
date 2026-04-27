@@ -1,4 +1,4 @@
-# Building matlab-ctl
+# Building ctl-matlab
 
 macOS only. Intel and Apple Silicon -- CMake defaults to a fat-binary
 build so one compiled `.mex*` loads on both.
@@ -75,13 +75,13 @@ Three other modes are available when the auto-discovery doesn't fit:
 
 `--fetch` adds a one-time CTL compile (~30-60s on M-series hardware)
 to the first configure. The clone lands under `build/_deps/ctl-src`
-and isn't shared with subsequent matlab-ctl checkouts; pin that with
+and isn't shared with subsequent ctl-matlab checkouts; pin that with
 `-DCTL_FETCH_TAG=<other-tag>` if needed.
 
 Equivalent CMake longhand:
 
 ```bash
-cd /path/to/matlab-ctl
+cd /path/to/ctl-matlab
 
 # brew ctl
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DCTL_FROM_BREW=ON
@@ -107,7 +107,7 @@ picked up.
 Open the project and apply one of the fixture CTLs:
 
 ```matlab
->> openProject('/Users/alex/Source/matlab-ctl/matlab-ctl.prj')
+>> openProject('/Users/alex/Source/ctl-matlab/ctl-matlab.prj')
 >> idCtl = fullfile(currentProject().RootFolder, 'tests', 'identity.ctl');
 >> apply_ctl(0.18, idCtl)
 ans =

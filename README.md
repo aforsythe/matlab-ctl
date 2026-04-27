@@ -1,9 +1,9 @@
-# matlab-ctl
+# ctl-matlab
 
-[![CI](https://github.com/aforsythe/matlab-ctl/actions/workflows/ci.yml/badge.svg)](https://github.com/aforsythe/matlab-ctl/actions/workflows/ci.yml)
-[![MATLAB](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/aforsythe/matlab-ctl/main/reports/badge/tested_with.json)](#testing)
-[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/aforsythe/matlab-ctl/main/reports/badge/coverage.json)](#testing)
-[![Code issues](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/aforsythe/matlab-ctl/main/reports/badge/code_issues.json)](#testing)
+[![CI](https://github.com/aforsythe/ctl-matlab/actions/workflows/ci.yml/badge.svg)](https://github.com/aforsythe/ctl-matlab/actions/workflows/ci.yml)
+[![MATLAB](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/aforsythe/ctl-matlab/main/reports/badge/tested_with.json)](#testing)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/aforsythe/ctl-matlab/main/reports/badge/coverage.json)](#testing)
+[![Code issues](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/aforsythe/ctl-matlab/main/reports/badge/code_issues.json)](#testing)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 Native MATLAB bindings for [CTL](https://github.com/aces-aswf/CTL) (the
@@ -93,8 +93,8 @@ symbols.
 
 ```bash
 brew install cmake imath openexr ctl
-git clone <this repo> matlab-ctl
-cd matlab-ctl
+git clone <this repo> ctl-matlab
+cd ctl-matlab
 ./build.sh
 ```
 
@@ -114,16 +114,16 @@ and notes on shipping the compiled MEX.
 
 The compiled `.mexmaca64` (or `.mexmaci64` on Intel) lands in
 `src/` next to `apply_ctl.m`. From MATLAB, double-click
-`matlab-ctl.prj` (or call `openProject('matlab-ctl.prj')`) to open
+`ctl-matlab.prj` (or call `openProject('ctl-matlab.prj')`) to open
 the project -- this auto-adds `src/` and `tests/` to the path:
 
 ```matlab
->> openProject('/path/to/matlab-ctl/matlab-ctl.prj')
+>> openProject('/path/to/ctl-matlab/ctl-matlab.prj')
 >> in  = rand(256, 256, 3);
 >> out = apply_ctl(in, "/path/to/my/transform.ctl");
 ```
 
-If you don't want to use a project, `addpath('/path/to/matlab-ctl/src')`
+If you don't want to use a project, `addpath('/path/to/ctl-matlab/src')`
 is enough to reach `apply_ctl`.
 
 For a guided tour of the API, open
@@ -258,7 +258,7 @@ wall-clock for a handful of samples is a few milliseconds.
 Quickest form, once the project is open:
 
 ```matlab
->> openProject('matlab-ctl.prj')
+>> openProject('ctl-matlab.prj')
 >> runtests('applyCtlTest')
 ```
 
@@ -368,12 +368,12 @@ Gathered in one place so expectations are clear:
 ## Project Structure
 
 ```
-matlab-ctl/
+ctl-matlab/
 |-- CMakeLists.txt
 |-- build.sh                     Auto-discovering CMake wrapper
 |-- buildfile.m                  MATLAB buildtool: check + test + clean
 |-- buildUtilities/              Shields.io-endpoint JSON generators
-|-- matlab-ctl.prj               MATLAB project (opens src/ + tests/)
+|-- ctl-matlab.prj               MATLAB project (opens src/ + tests/)
 |-- README.md
 |-- LICENSE
 |-- CITATION.cff

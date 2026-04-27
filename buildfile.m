@@ -1,5 +1,5 @@
 function plan = buildfile
-% BUILDFILE  Build plan for the matlab-ctl project.
+% BUILDFILE  Build plan for the ctl-matlab project.
 %
 %   plan = buildfile returns a buildplan that wires up three tasks
 %   against MATLAB's buildtool. Invoke via `buildtool <task>` at the

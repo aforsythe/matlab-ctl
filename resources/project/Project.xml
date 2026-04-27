@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project MetadataType="monolithic">
     <Info Location="ProjectData">
-        <Info Name="matlab-ctl"/>
+        <Info Name="ctl-matlab"/>
     </Info>
     <Categories Location="Root">
         <Category Location="FileClassCategory">

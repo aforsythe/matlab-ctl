@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Alex Forsythe, Academy of Motion Picture Arts and Sciences
 
 cmake_minimum_required(VERSION 3.22)
-project(matlab-ctl LANGUAGES CXX VERSION 0.1.0)
+project(ctl-matlab LANGUAGES CXX VERSION 0.1.0)
 
 #
 # macOS-only, Intel + Apple Silicon. Windows and Linux are non-goals
@@ -10,7 +10,7 @@ project(matlab-ctl LANGUAGES CXX VERSION 0.1.0)
 #
 if(NOT APPLE)
     message(FATAL_ERROR
-        "matlab-ctl currently targets macOS only. "
+        "ctl-matlab currently targets macOS only. "
         "See docs/PLAN.md if you need other platforms.")
 endif()
 

@@ -1,7 +1,7 @@
 cff-version: 1.2.0
-message: If you use matlab-ctl in academic work, please cite it via the metadata below.
+message: If you use ctl-matlab in academic work, please cite it via the metadata below.
 type: software
-title: matlab-ctl
+title: ctl-matlab
 abstract: >-
   Native MATLAB bindings for the CTL (Color Transformation Language)
   interpreter. Provides a MEX function that calls libIlmCtl
@@ -13,7 +13,7 @@ abstract: >-
 authors:
   - family-names: Forsythe
     given-names: Alex
-repository-code: https://github.com/aforsythe/matlab-ctl
+repository-code: https://github.com/aforsythe/ctl-matlab
 keywords:
   - color science
   - CTL
