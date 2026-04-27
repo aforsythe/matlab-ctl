@@ -207,8 +207,14 @@ classdef applyCtlTest < matlab.unittest.TestCase
             testCase.verifyTrue(isnan(out(1,1,1)));
             testCase.verifyTrue(isinf(out(2,2,2)) && out(2,2,2) > 0);
             testCase.verifyTrue(isinf(out(3,3,3)) && out(3,3,3) < 0);
-            testCase.verifyEqual(out(4,4,1), 0);
-            testCase.verifyEqual(out(4,4,2), 0);
+            % +0 and -0 compare equal under verifyEqual, so check the
+            % sign bit directly via the FP32 bit pattern.
+            posZeroBits = uint32(0);
+            negZeroBits = uint32(2147483648);  % 0x80000000
+            testCase.verifyEqual( ...
+                typecast(single(out(4,4,1)), 'uint32'), posZeroBits);
+            testCase.verifyEqual( ...
+                typecast(single(out(4,4,2)), 'uint32'), negZeroBits);
             % Everywhere except the NaN cell the identity should be
             % bit-exact at FP32 precision.
             mask = ~isnan(in);
@@ -226,7 +232,7 @@ classdef applyCtlTest < matlab.unittest.TestCase
             applyCtlTest.writeScaleCtl(dynCtl, 3.0);
             in = rand(16, 16, 3);
             outFirst = apply_ctl(in, sprintf('-ctl %s', dynCtl));
-            testCase.verifyEqual(outFirst, 3 * in, AbsTol=1e-5);
+            testCase.verifyEqual(outFirst, 3 * in, AbsTol=1e-6);
 
             % APFS stores nanosecond mtime; a fresh write on its own
             % should change (sec,nsec). Pausing 1.1s defends against
@@ -234,7 +240,7 @@ classdef applyCtlTest < matlab.unittest.TestCase
             pause(1.1);
             applyCtlTest.writeScaleCtl(dynCtl, 5.0);
             outSecond = apply_ctl(in, sprintf('-ctl %s', dynCtl));
-            testCase.verifyEqual(outSecond, 5 * in, AbsTol=1e-5);
+            testCase.verifyEqual(outSecond, 5 * in, AbsTol=1e-6);
         end
 
         function oddNameValuePairsRaises(testCase)
@@ -501,6 +507,183 @@ classdef applyCtlTest < matlab.unittest.TestCase
             testCase.verifyEqual(out, 2.5 * in, AbsTol=1e-6);
         end
 
+        % Input Validation Tests -- shape and dtype rejection paths
+
+        function badShapeMx2Raises(testCase)
+            % Mx2 (2-channel) doesn't match any accepted layout. The
+            % shape check is a guardrail in front of the MEX; calling
+            % it without the check would crash on bad strides.
+            try
+                apply_ctl(rand(4, 2), testCase.IdCtl);
+                testCase.verifyFail('expected an error');
+            catch err
+                testCase.verifyEqual(err.identifier, 'matlabctl:arg');
+                testCase.verifySubstring(err.message, 'Mx1');
+                testCase.verifySubstring(err.message, 'Mx3');
+                testCase.verifySubstring(err.message, 'MxNx3');
+            end
+        end
+
+        function badShapeRowVectorRaises(testCase)
+            % 1xN with N other than 1 or 3 falls under the same
+            % rejection as Mx2; the column-count check is what
+            % decides, not the row count.
+            try
+                apply_ctl(rand(1, 5), testCase.IdCtl);
+                testCase.verifyFail('expected an error');
+            catch err
+                testCase.verifyEqual(err.identifier, 'matlabctl:arg');
+                testCase.verifySubstring(err.message, 'Mx3');
+            end
+        end
+
+        function badShapeMxNx4Raises(testCase)
+            % 3-D input with a 4-channel third dim (RGBA image) must
+            % be rejected explicitly so callers don't accidentally
+            % feed alpha into rIn/gIn/bIn slots.
+            try
+                apply_ctl(rand(4, 4, 4), testCase.IdCtl);
+                testCase.verifyFail('expected an error');
+            catch err
+                testCase.verifyEqual(err.identifier, 'matlabctl:arg');
+                testCase.verifySubstring(err.message, '3 channels');
+            end
+        end
+
+        function badShape4DRaises(testCase)
+            % >3-D inputs (e.g. an image stack) aren't supported -- the
+            % MEX has no notion of a batch dimension. Reject up front.
+            try
+                apply_ctl(rand(2, 2, 2, 2), testCase.IdCtl);
+                testCase.verifyFail('expected an error');
+            catch err
+                testCase.verifyEqual(err.identifier, 'matlabctl:arg');
+                testCase.verifySubstring(err.message, '2-D or 3-D');
+            end
+        end
+
+        function scalarInputAcceptedAs1x3(testCase)
+            % A bare scalar is treated as Mx1 with M=1 and returned
+            % as a 1x3 RGB triplet. Pinning this so it doesn't
+            % accidentally tighten into a rejection later -- the
+            % `apply_ctl(0.18, ...)` call site is convenient.
+            out = apply_ctl(0.5, testCase.IdCtl);
+            testCase.verifySize(out, [1 3]);
+            testCase.verifyEqual(out, [0.5 0.5 0.5], AbsTol=1e-7);
+        end
+
+        % CTL Load Failure Tests -- file-system and parser failures
+        % must surface with a clear matlabctl:ctl identifier and the
+        % offending path in the message.
+
+        function missingCtlFileRaises(testCase)
+            % A path that doesn't exist must fail with the path named.
+            % Resolution is deferred to the MEX (cheaper than a
+            % pre-stat in MATLAB); the error has to make it back out
+            % cleanly anyway.
+            bogus = fullfile(tempname, 'does_not_exist.ctl');
+            try
+                apply_ctl(rand(4, 3), bogus);
+                testCase.verifyFail('expected an error');
+            catch err
+                testCase.verifyEqual(err.identifier, 'matlabctl:ctl');
+                testCase.verifySubstring(err.message, bogus);
+            end
+        end
+
+        function malformedCtlRaises(testCase)
+            % A file that exists but isn't valid CTL has to surface
+            % the parser's complaint, not crash the interpreter or
+            % silently load an empty module.
+            tmpdir = tempname;
+            mkdir(tmpdir);
+            c = onCleanup(@() rmdir(tmpdir, 's'));
+            badPath = fullfile(tmpdir, 'broken.ctl');
+            fid = fopen(badPath, 'w');
+            fprintf(fid, 'this is not valid CTL syntax @@@\n');
+            fclose(fid);
+
+            try
+                apply_ctl(rand(4, 3), badPath);
+                testCase.verifyFail('expected an error');
+            catch err
+                testCase.verifyEqual(err.identifier, 'matlabctl:ctl');
+                testCase.verifySubstring(err.message, badPath);
+            end
+        end
+
+        function emptyCtlMissingMainRaises(testCase)
+            % A syntactically valid but empty .ctl loads as an empty
+            % module; the dispatch step must reject the missing
+            % main() rather than silently no-op.
+            tmpdir = tempname;
+            mkdir(tmpdir);
+            c = onCleanup(@() rmdir(tmpdir, 's'));
+            emptyPath = fullfile(tmpdir, 'empty.ctl');
+            fid = fopen(emptyPath, 'w');
+            fclose(fid);
+
+            try
+                apply_ctl(rand(4, 3), emptyPath);
+                testCase.verifyFail('expected an error');
+            catch err
+                testCase.verifyEqual(err.identifier, 'matlabctl:ctl');
+                testCase.verifySubstring(err.message, 'main');
+            end
+        end
+
+        % Multi-File CTL Tests -- module imports resolved via
+        % CTL_MODULE_PATH. Each test gets a fresh main CTL (unique
+        % path => fresh interpreter cache slot) so we can flip the
+        % env var between cases without cross-contamination.
+
+        function moduleImportResolvesViaEnv(testCase)
+            % Happy path: helper module on CTL_MODULE_PATH, importing
+            % CTL calls into it. Mirrors the ACES v2 IDT/ODT shape
+            % where the transform pulls in shared utility modules.
+            [modroot, mainPath, cleanup] = ...
+                applyCtlTest.makeImportFixture('main_resolves'); %#ok<ASGLU>
+            setenv('CTL_MODULE_PATH', modroot);
+            in = rand(8, 8, 3);
+            out = apply_ctl(in, mainPath);
+            testCase.verifyEqual(out, 2 * in, AbsTol=1e-6);
+        end
+
+        function moduleImportFailsWithoutPath(testCase)
+            % CTL_MODULE_PATH unset: the helper can't be located, the
+            % load aborts, and the error must surface cleanly with
+            % matlabctl:ctl and the offending main path named.
+            [~, mainPath, cleanup] = ...
+                applyCtlTest.makeImportFixture('main_no_env'); %#ok<ASGLU>
+            setenv('CTL_MODULE_PATH', '');
+            try
+                apply_ctl(rand(4, 3), mainPath);
+                testCase.verifyFail('expected an error');
+            catch err
+                testCase.verifyEqual(err.identifier, 'matlabctl:ctl');
+                testCase.verifySubstring(err.message, mainPath);
+            end
+        end
+
+        function moduleImportCacheSurvivesEnvChange(testCase)
+            % Once the importing CTL is loaded and cached, subsequent
+            % calls hit the cache and don't re-resolve imports -- so
+            % the env var can be wiped or changed without breaking
+            % the call. Property matters for long-running sessions
+            % where the env may churn (e.g. switching between ACES
+            % library checkouts) but already-loaded transforms stay
+            % usable. Cache key is path+mtime; this test pins that
+            % env state is NOT part of the key.
+            [modroot, mainPath, cleanup] = ...
+                applyCtlTest.makeImportFixture('main_cache'); %#ok<ASGLU>
+            setenv('CTL_MODULE_PATH', modroot);
+            in = rand(4, 4, 3);
+            first = apply_ctl(in, mainPath);
+            setenv('CTL_MODULE_PATH', '');
+            second = apply_ctl(in, mainPath);
+            testCase.verifyEqual(second, first);
+        end
+
         function requiredParamRaises(testCase)
             % A CTL whose main() takes a non-defaulted uniform input
             % must be rejected up front with the parameter named.
@@ -532,6 +715,52 @@ classdef applyCtlTest < matlab.unittest.TestCase
     end
 
     methods (Access = private, Static)
+        function [modroot, mainPath, cleanup] = makeImportFixture(tag)
+            % Build a self-contained {helper module, importing main}
+            % pair in a fresh temp directory. The returned CLEANUP
+            % onCleanup object both restores CTL_MODULE_PATH to its
+            % prior value and removes the temp tree -- callers must
+            % keep it in scope for the lifetime of the test.
+            arguments
+                tag (1,:) char
+            end
+            tmpdir  = tempname;
+            modroot = fullfile(tmpdir, 'mods');
+            maindir = fullfile(tmpdir, 'main');
+            mkdir(modroot);
+            mkdir(maindir);
+            fid = fopen(fullfile(modroot, 'Scaler.ctl'), 'w');
+            fprintf(fid, ['float scale(float x, float k) ', ...
+                          '{ return x * k; }\n']);
+            fclose(fid);
+            mainPath = fullfile(maindir, [tag '.ctl']);
+            fid = fopen(mainPath, 'w');
+            fprintf(fid, 'import "Scaler";\n');
+            fprintf(fid, 'void main(\n');
+            fprintf(fid, '    input  varying float rIn,\n');
+            fprintf(fid, '    input  varying float gIn,\n');
+            fprintf(fid, '    input  varying float bIn,\n');
+            fprintf(fid, '    output varying float rOut,\n');
+            fprintf(fid, '    output varying float gOut,\n');
+            fprintf(fid, '    output varying float bOut)\n');
+            fprintf(fid, '{\n');
+            fprintf(fid, '    rOut = scale(rIn, 2.0);\n');
+            fprintf(fid, '    gOut = scale(gIn, 2.0);\n');
+            fprintf(fid, '    bOut = scale(bIn, 2.0);\n');
+            fprintf(fid, '}\n');
+            fclose(fid);
+            prevEnv = getenv('CTL_MODULE_PATH');
+            cleanup = onCleanup(@() applyCtlTest.restoreImportFixture( ...
+                tmpdir, prevEnv));
+        end
+
+        function restoreImportFixture(tmpdir, prevEnv)
+            setenv('CTL_MODULE_PATH', prevEnv);
+            if isfolder(tmpdir)
+                rmdir(tmpdir, 's');
+            end
+        end
+
         function writeScaleCtl(path, factor)
             % Emit a tiny rIn/gIn/bIn -> rOut/gOut/bOut CTL that
             % multiplies each channel by FACTOR. CTL's grammar needs
