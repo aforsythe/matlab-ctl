@@ -18,16 +18,11 @@ function out = ctlrender_via_disk(in, ctl_paths, ctlrender_path, opts)
 %       ctlrender_path - Path to the ctlrender binary (char)
 %
 %   OPTIONAL INPUTS (Name-Value):
-%       Params    - Nx2 string array of {name, value} pairs to pass
-%                   to ctlrender as -param1 flags. Useful for
-%                   uniform CTL inputs that lack a source-level
-%                   default. Default: empty.
 %       WithAlpha - When true, write a 4-channel RGBA float TIFF
 %                   with alpha = 1.0 instead of RGB. Required for
 %                   ACES IDT/ODT chains where the CTL declares a
 %                   varying `aIn` without a default -- ctlrender
-%                   binds aIn from the input's alpha channel and
-%                   `-param1` won't satisfy a varying input.
+%                   binds aIn from the input's alpha channel.
 %                   Default: false.
 %       ExtraEnv  - 1xN string array of "VAR=value" assignments to
 %                   prepend to the ctlrender command (e.g. for
@@ -46,7 +41,7 @@ function out = ctlrender_via_disk(in, ctl_paths, ctlrender_path, opts)
 %
 %       % ACES ODT chain with alpha and module path
 %       out = ctlrender_via_disk(img, {idt, odt}, ctlr, ...
-%                                Params=["aIn","1.0"], ...
+%                                WithAlpha=true, ...
 %                                ExtraEnv="CTL_MODULE_PATH=/aces/lib");
 %
 %   Copyright (c) 2026 Alex Forsythe, Academy of Motion Picture Arts and Sciences
@@ -56,7 +51,6 @@ arguments
     in              (:,:,3) {mustBeNumeric, mustBeReal}
     ctl_paths       cell
     ctlrender_path  (1,:) char {mustBeFile}
-    opts.Params     string = strings(0, 2)
     opts.WithAlpha  (1,1) logical = false
     opts.ExtraEnv   string = strings(1, 0)
 end
@@ -104,18 +98,13 @@ end
     for i = 1:numel(ctl_paths)
         ctl_flags = [ctl_flags, ' -ctl ', ctl_paths{i}]; %#ok<AGROW>
     end
-    param_flags = '';
-    for i = 1:size(opts.Params, 1)
-        param_flags = [param_flags, sprintf(' -param1 %s %s', ...
-            opts.Params(i, 1), opts.Params(i, 2))]; %#ok<AGROW>
-    end
     env_prefix = '';
     if ~isempty(opts.ExtraEnv)
         env_prefix = [char(strjoin(opts.ExtraEnv, ' ')), ' '];
     end
-    cmd = sprintf('%s"%s"%s%s -format tiff32 -force "%s" "%s"', ...
+    cmd = sprintf('%s"%s"%s -format tiff32 -force "%s" "%s"', ...
                   env_prefix, ctlrender_path, ctl_flags, ...
-                  param_flags, in_tif, out_tif);
+                  in_tif, out_tif);
 
     [status, result] = system(cmd);
     if status ~= 0
